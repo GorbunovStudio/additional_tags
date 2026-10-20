@@ -6,6 +6,7 @@ module AdditionalTagsIssuesHelper
     rc = super
 
     if @issue.present? &&
+       !respond_to?(:render_api_optimus_tags) &&
        (defined?(controller_name) && controller_name == 'issues' && action_name == 'show' || !defined?(controller_name)) &&
        AdditionalTags.setting?(:active_issue_tags) && User.current.allowed_to?(:view_issue_tags, @project)
 

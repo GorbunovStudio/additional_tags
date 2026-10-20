@@ -34,3 +34,16 @@ Redmine::Plugin.register :additional_tags do
 end
 
 RedminePluginKit::Loader.persisting { loader.load_model_hooks! }
+
+require 'redmine/views/api_template_handler'
+require_relative 'lib/additional_tags/optimus_api_tags'
+
+prepare_optimus_api_tags = proc do
+  handler = Redmine::Views::ApiTemplateHandler.singleton_class
+  handler.prepend AdditionalTags::OptimusApiTags unless handler < AdditionalTags::OptimusApiTags
+  unless ApplicationController._helpers < AdditionalTags::OptimusApiTagsHelper
+    ApplicationController.helper AdditionalTags::OptimusApiTagsHelper
+  end
+end
+prepare_optimus_api_tags.call
+Rails.application.config.to_prepare(&prepare_optimus_api_tags)
