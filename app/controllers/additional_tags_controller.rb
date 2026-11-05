@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 class AdditionalTagsController < ApplicationController
-  before_action :require_admin
+  before_action :require_admin, except: :index
+  before_action :require_login, only: :index
   before_action :find_tag, only: %i[edit update]
   before_action :bulk_find_tags, only: %i[context_menu merge destroy]
   before_action :set_tag_list_path
@@ -13,13 +14,22 @@ class AdditionalTagsController < ApplicationController
 
   # used by api calls
   def index
+    return unless api_request? || require_admin
+
     type_info = manageable_tag_columns.detect { |m| m.first.to_s == params[:type] } if params[:type].present?
     return render_invalid_tag_type if type_info.nil?
 
     klass = type_info.first.to_s.camelize.constantize
     return render_invalid_tag_type unless klass.respond_to? :available_tags
 
-    @tags = klass.available_tags.to_a
+    if api_request? && params[:project_id].present?
+      project = find_visible_project
+      return render_404 if project.nil?
+
+      @tags = klass.available_tags(project:).to_a
+    else
+      @tags = klass.available_tags.to_a
+    end
     @count = @tags.count
     @tag_type = klass.name
 
@@ -82,6 +92,13 @@ class AdditionalTagsController < ApplicationController
       format.html { render_error message:, status: 422 }
       format.api { render_api_errors message }
     end
+  end
+
+  def find_visible_project
+    project = Project.find params[:project_id].to_s
+    project if project.visible?(User.current)
+  rescue ActiveRecord::RecordNotFound
+    nil
   end
 
   def set_tag_list_path
