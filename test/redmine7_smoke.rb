@@ -294,6 +294,94 @@ class OptimusTagListApiSmokeTest < OptimusTagsSmokeTest
     assert Setting.display_subprojects_issues?
   end
 
+  def test_search_matches_case_insensitively_with_scoped_counts_in_json_and_xml
+    sign_in_api_key(@requester)
+    expected = expected_issue_tags(@requester).select { |name, _| name.downcase.include?('fixture-') }
+    request_tags({q: ' FiXtUrE- '})
+    assert_response :success
+    assert_requested_as @requester
+    actual = json_tags
+    assert_equal expected, actual
+    assert_equal 2, fixture_tags(actual).fetch('shared')
+    %w[child-denied-only denied-only private-only].each do |name|
+      refute_includes actual.keys, "optimus-fixture-#{name}"
+    end
+
+    request_tags({q: ' FiXtUrE- '}, 'xml')
+    assert_response :success
+    assert_requested_as @requester
+    doc = Nokogiri::XML(response.body)
+    entries = doc.xpath('//tags/tag')
+    assert_equal expected, entries.to_h { |tag| [tag['name'], [tag['id'].to_i, tag['count'].to_i]] }
+    assert_equal expected.size, doc.root['total_count'].to_i
+    assert_equal 'Issue', doc.root['tag_type']
+  end
+
+  def test_search_orders_by_scoped_count_then_name
+    sign_in_api_key(@requester)
+    expected = expected_issue_tags(@requester).select { |name, _| name.downcase.include?('optimus-fixture-') }
+    request_tags({q: 'optimus-fixture-'})
+    assert_response :success
+    assert_equal expected, json_tags
+    names = JSON.parse(response.body).fetch('tags').map { |tag| tag.fetch('name') }
+    assert_equal expected.sort_by { |name, (_, count)| [-count, name] }.map(&:first), names
+    assert_equal %w[priv-count shared child-only parent-only].map { |name| "optimus-fixture-#{name}" }, names
+  end
+
+  def test_search_intersects_project_selection_and_counts
+    sign_in_api_key(@requester)
+    scoped = expected_issue_tags(@requester, [@child_ok.id])
+    request_tags({project_id: @child_ok.identifier, q: 'only'})
+    assert_response :success
+    actual = json_tags
+    assert_equal scoped.select { |name, _| name.downcase.include?('only') }, actual
+    assert_equal({'child-only' => 1}, fixture_tags(actual))
+    refute_includes actual.keys, 'optimus-fixture-parent-only'
+    refute_includes actual.keys, 'optimus-fixture-shared'
+
+    request_tags({project_id: @child_ok.identifier, q: 'shared'})
+    assert_response :success
+    actual = json_tags
+    assert_equal scoped.select { |name, _| name.downcase.include?('shared') }, actual
+    assert_equal 1, fixture_tags(actual).fetch('shared')
+  end
+
+  def test_search_treats_like_characters_literally
+    ['literal%mark', 'literal_mark', 'literal\\mark', 'literalXmark', 'literalmark'].each do |name|
+      @tags[name] = AdditionalTag.create!(name: "optimus-fixture-#{name}")
+    end
+    create_fixture_issue(@parent, ['literal%mark', 'literal_mark', 'literal\\mark', 'literalXmark', 'literalmark'])
+    sign_in_api_key(@requester)
+    ['%', '_', '\\'].each do |query|
+      expected = expected_issue_tags(@requester).select { |name, _| name.downcase.include?(query.downcase) }
+      request_tags({q: query})
+      assert_response :success
+      assert_equal expected, json_tags
+      actual_names = JSON.parse(response.body).fetch('tags').map { |tag| tag.fetch('name') }
+      assert_includes actual_names, "optimus-fixture-literal#{query}mark"
+      refute_includes actual_names, 'optimus-fixture-literalXmark'
+    end
+  end
+
+  def test_blank_search_preserves_plain_list_and_name_order
+    sign_in_api_key(@requester)
+    expected = expected_issue_tags(@requester)
+    request_tags
+    assert_response :success
+    assert_equal expected, json_tags
+    plain_names = JSON.parse(response.body).fetch('tags').map { |tag| tag.fetch('name') }
+    fixture_names = plain_names.select { |name| name.start_with?('optimus-fixture-') }
+    assert_equal fixture_names.sort, fixture_names
+
+    ['', " \t "].each do |query|
+      request_tags({q: query})
+      assert_response :success
+      assert_equal expected, json_tags
+      names = JSON.parse(response.body).fetch('tags').map { |tag| tag.fetch('name') }
+      assert_equal plain_names, names
+    end
+  end
+
   def test_non_admin_api_key_lists_scoped_tags_in_json_and_xml
     sign_in_api_key(@requester)
     request_tags

@@ -22,14 +22,20 @@ class AdditionalTagsController < ApplicationController
     klass = type_info.first.to_s.camelize.constantize
     return render_invalid_tag_type unless klass.respond_to? :available_tags
 
-    if api_request? && params[:project_id].present?
-      project = find_visible_project
-      return render_404 if project.nil?
+    options = {}
+    if api_request?
+      if params[:project_id].present?
+        project = find_visible_project
+        return render_404 if project.nil?
 
-      @tags = klass.available_tags(project:).to_a
-    else
-      @tags = klass.available_tags.to_a
+        options[:project] = project
+      end
+      q = params[:q].to_s.strip
+      if q.present?
+        options.merge!(name_like: ActiveRecord::Base.sanitize_sql_like(q), sort_by: 'count', order: 'DESC')
+      end
     end
+    @tags = klass.available_tags(**options).to_a
     @count = @tags.count
     @tag_type = klass.name
 
