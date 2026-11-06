@@ -27,10 +27,46 @@ class AdditionalTagsControllerTest < AdditionalTags::ControllerTest
     end
   end
 
-  def test_index_without_permission
+  def test_index_api_as_non_admin_lists_tags_of_permitted_projects
+    role = Role.generate! permissions: %i[view_issues view_issue_tags]
+    user = User.generate!
+    User.add_to_project user, @project_a, role
+    @request.headers['X-Redmine-API-Key'] = user.api_key
+
+    with_settings rest_api_enabled: '1' do
+      with_plugin_settings 'additional_tags', active_issue_tags: 1 do
+        get :index,
+            params: { type: 'issue', format: 'xml' }
+
+        assert_response :success
+        assert_select 'tags > tag', count: 4
+        %w[a1 a2 a4 a5].each { |name| assert_select "tags > tag[name='#{name}'][count='1']", 1 }
+        %w[b6 b7 b8 b9].each { |name| assert_select "tags > tag[name='#{name}']", 0 }
+      end
+    end
+  end
+
+  def test_index_api_as_non_admin_without_tag_permission_returns_empty_list
+    role = Role.generate! permissions: %i[view_issues]
+    user = User.generate!
+    User.add_to_project user, @project_a, role
+    @request.headers['X-Redmine-API-Key'] = user.api_key
+
+    with_settings rest_api_enabled: '1' do
+      with_plugin_settings 'additional_tags', active_issue_tags: 1 do
+        get :index,
+            params: { type: 'issue', format: 'xml' }
+
+        assert_response :success
+        assert_select 'tags > tag', 0
+      end
+    end
+  end
+
+  def test_index_html_as_non_admin_is_forbidden
     @request.session[:user_id] = 2
     get :index,
-        params: { type: 'issue', format: 'xml' }
+        params: { type: 'issue' }
 
     assert_response :forbidden
   end
